@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js 3D 方块收集小游戏</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; font-family: Arial, sans-serif; }
+        #gameContainer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        #score { position: absolute; top: 20px; left: 20px; color: white; font-size: 24px; z-index: 100; text-shadow: 2px 2px 4px #000; }
+        #instructions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: white; font-size: 16px; text-align: center; z-index: 100; text-shadow: 2px 2px 4px #000; }
+    </style>
+    <!-- 引入 three.js 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+</head>
+<body>
+    <div id="gameContainer"></div>
+    <div id="score">得分: 0</div>
+    <div id="instructions">
+        WASD 移动 | 鼠标控制视角 | 收集彩色方块得分
+    </div>
+
+    <script>
+        // 1. 初始化核心变量
+        let scene, camera, renderer, player, collectibles = [];
+        let score = 0;
+        const moveSpeed = 5; // 玩家移动速度
+        const collectibleCount = 15; // 可收集方块数量
+        const keys = {}; // 存储按键状态
+
+        // 2. 初始化游戏场景
+        function init() {
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // 天空蓝背景
+
+            // 创建相机 (透视相机)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10); // 相机初始位置
+            camera.lookAt(0, 0, 0); // 相机看向原点
+
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true }); // 抗锯齿
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; // 启用阴影
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+
+            // 添加光照
+            addLights();
+            
+            // 创建地面
+            createGround();
+            
+            // 创建玩家
+            createPlayer();
+            
+            // 生成可收集方块
+            createCollectibles();
+            
+            // 监听事件
+            addEventListeners();
+            
+            // 开始游戏循环
+            animate();
+        }
+
+        // 3. 添加光照
+        function addLights() {
+            // 环境光 (基础照明)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            // 方向光 (模拟太阳光，产生阴影)
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+        }
+
+        // 4. 创建地面
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(100, 100);
+            const groundMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x228b22, // 森林绿
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // 旋转90度，让平面水平
+            ground.receiveShadow = true; // 接收阴影
+            scene.add(ground);
+
+            // 添加网格辅助线 (可选，便于观察)
+            const gridHelper = new THREE.GridHelper(100, 20, 0x000000, 0x000000);
+            gridHelper.material.opacity = 0.2;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+        }
+
+        // 5. 创建玩家 (黄色立方体)
+        function createPlayer() {
+            const playerGeometry = new THREE.BoxGeometry(1, 1, 1);
+            const playerMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+            player = new THREE.Mesh(playerGeometry, playerMaterial);
+            player.position.y = 0.5; // 让玩家刚好在地面上
+            player.castShadow = true; // 投射阴影
+            scene.add(player);
+        }
+
+        // 6. 生成可收集方块
+        function createCollectibles() {
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff00ff, 0x00ffff]; // 红、绿、蓝、紫、青
+
+            for (let i = 0; i < collectibleCount; i++) {
+                const size = 0.8;
+                const collectibleGeometry = new THREE.BoxGeometry(size, size, size);
+                const collectibleMaterial = new THREE.MeshStandardMaterial({ 
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    emissive: 0x333333 // 轻微自发光
+                });
+                const collectible = new THREE.Mesh(collectibleGeometry, collectibleMaterial);
+                
+                // 随机位置 (避免太靠近中心，且在地面上)
+                collectible.position.x = (Math.random() - 0.5) * 80;
+                collectible.position.z = (Math.random() - 0.5) * 80;
+                collectible.position.y = size / 2;
+                
+                collectible.castShadow = true;
+                scene.add(collectible);
+                collectibles.push(collectible);
+            }
+        }
+
+        // 7. 事件监听
+        function addEventListeners() {
+            // 键盘按下/松开
+            document.addEventListener('keydown', (e) => {
+                keys[e.key.toLowerCase()] = true;
+            });
+            document.addEventListener('keyup', (e) => {
+                keys[e.key.toLowerCase()] = false;
+            });
+
+            // 窗口大小调整
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // 鼠标控制视角 (简单版视角跟随)
+            let isMouseDown = false;
+            let mouseX = 0, mouseY = 0;
+            
+            document.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                mouseX = e.clientX;
+                mouseY = e.clientY;
+            });
+            
+            document.addEventListener('mouseup', () => {
+                isMouseDown = false;
+            });
+            
+            document.addEventListener('mousemove', (e) => {
+                if (isMouseDown) {
+                    const deltaX = e.clientX - mouseX;
+                    mouseX = e.clientX;
+                    
+                    // 旋转玩家和相机
+                    player.rotation.y -= deltaX * 0.01;
+                    camera.position.x = player.position.x + 10 * Math.sin(player.rotation.y);
+                    camera.position.z = player.position.z + 10 * Math.cos(player.rotation.y);
+                    camera.lookAt(player.position);
+                }
+            });
+        }
+
+        // 8. 更新玩家移动
+        function updatePlayer(deltaTime) {
+            const moveDistance = moveSpeed * deltaTime;
+            
+            // 根据按键移动玩家 (基于玩家朝向)
+            if (keys['w']) {
+                player.position.x -= Math.sin(player.rotation.y) * moveDistance;
+                player.position.z -= Math.cos(player.rotation.y) * moveDistance;
+            }
+            if (keys['s']) {
+                player.position.x += Math.sin(player.rotation.y) * moveDistance;
+                player.position.z += Math.cos(player.rotation.y) * moveDistance;
+            }
+            if (keys['a']) {
+                player.position.x -= Math.sin(player.rotation.y - Math.PI/2) * moveDistance;
+                player.position.z -= Math.cos(player.rotation.y - Math.PI/2) * moveDistance;
+            }
+            if (keys['d']) {
+                player.position.x -= Math.sin(player.rotation.y + Math.PI/2) * moveDistance;
+                player.position.z -= Math.cos(player.rotation.y + Math.PI/2) * moveDistance;
+            }
+
+            // 限制玩家移动范围
+            player.position.x = Math.max(-45, Math.min(45, player.position.x));
+            player.position.z = Math.max(-45, Math.min(45, player.position.z));
+
+            // 更新相机位置 (跟随玩家)
+            camera.position.x = player.position.x + 10 * Math.sin(player.rotation.y);
+            camera.position.z = player.position.z + 10 * Math.cos(player.rotation.y);
+            camera.position.y = player.position.y + 5;
+            camera.lookAt(player.position);
+        }
+
+        // 9. 碰撞检测 (收集方块)
+        function checkCollisions() {
+            for (let i = collectibles.length - 1; i >= 0; i--) {
+                const collectible = collectibles[i];
+                
+                // 简单的球形碰撞检测
+                const distance = player.position.distanceTo(collectible.position);
+                if (distance < 1) {
+                    // 收集方块
+                    scene.remove(collectible);
+                    collectibles.splice(i, 1);
+                    score += 10; // 每收集一个加10分
+                    document.getElementById('score').textContent = `得分: ${score}`;
+
+                    // 全部收集完重新生成
+                    if (collectibles.length === 0) {
+                        setTimeout(createCollectibles, 1000);
+                    }
+                }
+            }
+        }
+
+        // 10. 游戏循环
+        let lastTime = 0;
+        function animate(currentTime = 0) {
+            requestAnimationFrame(animate);
+            
+            // 计算帧间隔时间 (秒)
+            const deltaTime = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+
+            // 更新玩家状态
+            updatePlayer(deltaTime);
+            
+            // 检测碰撞
+            checkCollisions();
+
+            // 渲染场景
+            renderer.render(scene, camera);
+        }
+
+        // 启动游戏
+        init();
+    </script>
+</body>
+</html>
